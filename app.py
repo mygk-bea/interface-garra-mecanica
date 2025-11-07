@@ -5,6 +5,23 @@ import serial.tools.list_ports
 import threading
 import time
 
+import math
+
+# --- Constantes físicas do braço (em mm) ---
+L1 = 110.0
+L2 = 80.0
+L3 = 90.0
+R_MAX = L2 + L3
+R_MIN = abs(L2 - L3)
+
+def check_reachable(x, y, z):
+    r = math.hypot(x, y)
+    zprime = z - L1
+    d = math.hypot(r, zprime)
+    if d < R_MIN or d > R_MAX:
+        return False, f"Fora de alcance: distância total={d:.1f} mm (permitido entre {R_MIN:.1f} e {R_MAX:.1f} mm)"
+    return True, f"OK (r={r:.1f}, z'={zprime:.1f}, d={d:.1f})"
+
 class App:
     def __init__(self, root):
         self.root = root
@@ -79,12 +96,28 @@ class App:
         self.ser.write((s+"\n").encode())
 
     def move_cmd(self):
-        x = self.x_e.get(); y = self.y_e.get(); z = self.z_e.get(); v = self.v_e.get()
+        x = self.x_e.get()
+        y = self.y_e.get()
+        z = self.z_e.get()
+        v = self.v_e.get()
+
         try:
-            float(x); float(y); float(z); int(v)
-        except:
-            messagebox.showerror("Erro","Valores inválidos")
+            x = float(x)
+            y = float(y)
+            z = float(z)
+            v = int(v)
+        except ValueError:
+            messagebox.showerror("Erro", "Valores inválidos. Use números.")
             return
+
+        ok, msg = check_reachable(x, y, z)
+        if not ok:
+            messagebox.showerror("Posição fora de alcance", msg)
+            print("ALERTA:", msg)
+            return
+        else:
+            print("Verificação:", msg)
+
         cmd = f"MOV {x} {y} {z} {v} {self.elbow.get()}"
         self.send(cmd)
 
