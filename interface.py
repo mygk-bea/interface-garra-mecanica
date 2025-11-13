@@ -8,16 +8,25 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from scipy.optimize import fsolve
 
 # =========================
-# Configuração Serial Arduino
+# Configuração Serial Arduino com modo DEBUG
 # =========================
-PORTA = "COM7"  # altere para sua porta (ex: "COM3" ou "/dev/ttyUSB0")
-BAUDRATE = 9600
-try:
+DEBUG = True  # coloque False quando for usar o Arduino real
+
+if not DEBUG:
+    PORTA = "COM7"  # altere para sua porta
+    BAUDRATE = 9600
     arduino = serial.Serial(PORTA, BAUDRATE, timeout=1)
     time.sleep(2)
-except Exception as e:
-    print(f"Erro ao abrir porta serial {PORTA}: {e}")
-    arduino = None
+else:
+    class FakeArduino:
+        def write(self, data):
+            print(f"[DEBUG] Enviando comando simulado: {data.decode().strip()}")
+        def readline(self):
+            return b"[DEBUG] resposta simulada\n"
+        @property
+        def in_waiting(self):
+            return 0
+    arduino = FakeArduino()
 
 # =========================
 # Braço Robótico
@@ -26,11 +35,10 @@ Lbase, L2, L3, L4 = 19.2, 8.0, 12.0, 8.0
 L_final, Lpen = 0.0, 14.0
 reducoes = [24, 24, 24, 8]
 steps_per_rev_motor = 32
-# graus por passo (graus por cada passo físico do sistema de redução)
 graus_por_passo = [360 / (steps_per_rev_motor * 64 * r) for r in reducoes]
 
 # =========================
-# Variáveis de posição atual (radianos)
+# Variáveis de posição atual (em radianos)
 # =========================
 theta1_atual = theta2_atual = theta3_atual = theta4_atual = 0.0
 
@@ -38,16 +46,15 @@ theta1_atual = theta2_atual = theta3_atual = theta4_atual = 0.0
 # Funções Arduino
 # =========================
 def enviar_comando(motor, direcao, passos, delay):
-    """Envia comando serial no formato 'motor,acao,passos,delay' se a serial estiver aberta."""
-    if arduino is None:
-        print("Arduino não conectado — comando não enviado:", motor, direcao, passos, delay)
-        return
     cmd = f"{motor},{direcao},{passos},{delay}\n"
     arduino.write(cmd.encode())
-    time.sleep(0.02)
-    # lê resposta (se houver) para esvaziar buffer
-    while arduino.in_waiting > 0:
-        print(arduino.readline().decode().strip())
+    time.sleep(0.05)
+    # imprime resposta serial se houver
+    while getattr(arduino, "in_waiting", 0) > 0:
+        try:
+            print(arduino.readline().decode().strip())
+        except:
+            break
 
 def comando_motor(motor_num):
     direcao = sentido_var[motor_num].get()
@@ -79,10 +86,7 @@ def direta(t1, t2, t3, t4):
     return xs, ys, zs
 
 def angulo_para_passos(delta_rad, motor_idx):
-    """Converte delta (rad) para número inteiro de passos (assina positiva/negativa)."""
-    deg = np.degrees(delta_rad)
-    passos = int(round(deg / graus_por_passo[motor_idx]))
-    return passos
+    return int(round(np.degrees(delta_rad) / graus_por_passo[motor_idx]))
 
 def delta_theta(theta_dest, theta_atual):
     d = theta_dest - theta_atual
@@ -97,7 +101,6 @@ def erro_angulos(thetas, x_desejado, y_desejado, z_desejado):
     t1, t2, t3, t4 = thetas
     xs, ys, zs = direta(t1, t2, t3, t4)
     x_atual, y_atual, z_atual = xs[-1], ys[-1], zs[-1]
-    # Quarta equação força a orientação (p.ex. pulso plano)
     return [
         x_atual - x_desejado,
         y_atual - y_desejado,
@@ -113,32 +116,23 @@ def inversa_fsolve(x, y, z, chute_inicial=None):
     return sol
 
 # =========================
-# Movimento incremental
+# Movimento incremental (corrigido)
 # =========================
 def calcular_jacobiano(t1, t2, t3, t4, delta=1e-6):
-    f0 = direta(t1, t2, t3, t4)
+    f0 = np.array(direta(t1, t2, t3, t4))
     pos0 = np.array([f0[0,-1], f0[1,-1], f0[2,-1]])
     J = np.zeros((3,4))
     thetas = [t1, t2, t3, t4]
     for i in range(4):
         dtheta = np.zeros(4)
         dtheta[i] = delta
-        # cria lista de thetas com o delta aplicado
-        thetas_pert = [thetas[j] + dtheta[j] for j in range(4)]
-        f1 = direta(*thetas_pert)
+        args = [thetas[j] + dtheta[j] for j in range(4)]
+        f1 = np.array(direta(*args))
         pos1 = np.array([f1[0,-1], f1[1,-1], f1[2,-1]])
         J[:,i] = (pos1 - pos0)/delta
     return J
 
 def mover_para_coordenada_seguro():
-    """
-    Divide o deslocamento em pequenos passos em X,Y,Z e aplica incremental via J^+.
-    Correções aplicadas:
-    - usa angulo_para_passos para obter passos inteiros mantendo sinal;
-    - mapeia corretamente o sinal dos passos para 'H'/'A';
-    - atualiza os thetas usando o número efetivo de passos (conversão p/ radianos)
-    - trata singularidade do jacobiano usando pseudo-inversa com rcond aumentado
-    """
     global theta1_atual, theta2_atual, theta3_atual, theta4_atual
     try:
         x_dest = float(entry_x.get())
@@ -152,54 +146,42 @@ def mover_para_coordenada_seguro():
     pos_atual = np.array([xs[-1], ys[-1], zs[-1]])
     dpos_total = np.array([x_dest, y_dest, z_dest]) - pos_atual
     distancia = np.linalg.norm(dpos_total)
-    passo_max = 1.0  # cm por iteração
+    passo_max = 1.0  # passo máximo em cm por iteração
     n_passos = int(np.ceil(distancia / passo_max))
-    if n_passos == 0:
-        label_coord.config(text=f"Pos atual: X={pos_atual[0]:.1f}, Y={pos_atual[1]:.1f}, Z={pos_atual[2]:.1f}")
+    if n_passos == 0: 
         return
     dpos_step = dpos_total / n_passos
 
-    for step_idx in range(n_passos):
+    for _ in range(n_passos):
         J = calcular_jacobiano(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
-        # se o jacobiano for mal condicionado, aumenta rcond
-        try:
-            # rcond pequeno -> normal; se rank baixo, usa rcond maior
-            if np.linalg.matrix_rank(J) < 3:
-                dtheta = np.linalg.pinv(J, rcond=1e-2) @ dpos_step
-            else:
-                dtheta = np.linalg.pinv(J) @ dpos_step
-        except Exception as e:
-            print("Erro ao inverter J:", e)
-            return
+        # pseudo-inversa e cálculo de dtheta (radianos)
+        dtheta = np.linalg.pinv(J) @ dpos_step  # vetor 4x: radianos
+        # converte cada dtheta para passos inteiros considerando graus_por_passo
+        passos_por_junta = [int(round(np.degrees(dtheta[i]) / graus_por_passo[i])) for i in range(4)]
 
-        # converte incrementos rad -> passos inteiros (preservando sinal)
-        passos_signed = [angulo_para_passos(dtheta[i], i) for i in range(4)]
+        # envia comando por junta e calcula o ângulo realmente executado a partir dos passos inteiros
+        executado_radians = np.zeros(4)
+        for i, p in enumerate(passos_por_junta):
+            if p == 0:
+                continue
+            # direção: mantive convenção -> p > 0 => 'H' (horário), p < 0 => 'A' (anti)
+            direcao = 'H' if p > 0 else 'A'
+            passos_envio = abs(p)
+            enviar_comando(i+1, direcao, passos_envio, 10)
+            # ângulo efetivamente executado (radianos) = passos * graus_por_passo (graus) -> rad
+            ang_exec_deg = passos_envio * graus_por_passo[i]
+            ang_exec_rad = np.radians(ang_exec_deg)
+            # respeitar sinal original do p
+            if p < 0:
+                ang_exec_rad = -ang_exec_rad
+            executado_radians[i] = ang_exec_rad
 
-        # envia comandos aos motores
-        for i, passos in enumerate(passos_signed):
-            if passos == 0: continue
-            direcao = 'H' if passos > 0 else 'A'  # padrão: positivo -> H
-            enviar_comando(i+1, direcao, abs(passos), 10)
+        # Atualiza ângulos atuais com o que foi efetivamente executado
+        theta1_atual += executado_radians[0]
+        theta2_atual += executado_radians[1]
+        theta3_atual += executado_radians[2]
+        theta4_atual += executado_radians[3]
 
-        # **Atualiza os ângulos atuais COM base nos passos aplicados**
-        # (em vez de usar dtheta direto, usamos passos efetivos para ficar consistente com o que o motor executou)
-        for i, passos in enumerate(passos_signed):
-            # passos * graus_por_passo[i] -> graus efetivos movidos; converter para rad
-            delta_deg = passos * graus_por_passo[i]
-            delta_rad = np.radians(delta_deg)
-            if i == 0:
-                theta1_atual += delta_rad
-            elif i == 1:
-                theta2_atual += delta_rad
-            elif i == 2:
-                theta3_atual += delta_rad
-            elif i == 3:
-                theta4_atual += delta_rad
-
-        # pequena espera para dar tempo ao Arduino (pode ajustar)
-        # tempo estimado aproximado = passos * delay(ms) / 1000.0
-        # aqui fazemos um sleep curto para não travar muito a GUI
-        time.sleep(0.05)
         atualizar_plot()
 
     label_coord.config(text=f"Pos atual: X={x_dest:.1f}, Y={y_dest:.1f}, Z={z_dest:.1f}")
@@ -227,20 +209,8 @@ def mover_para_absoluto_fsolve():
         if p == 0: continue
         direcao = 'H' if p > 0 else 'A'
         enviar_comando(i+1, direcao, abs(p), 10)
-
-    # atualiza os thetas reais usando os passos efetivos enviados
-    for i, p in enumerate(dif_passos):
-        delta_deg = p * graus_por_passo[i]
-        delta_rad = np.radians(delta_deg)
-        if i == 0:
-            theta1_atual += delta_rad
-        elif i == 1:
-            theta2_atual += delta_rad
-        elif i == 2:
-            theta3_atual += delta_rad
-        elif i == 3:
-            theta4_atual += delta_rad
-
+    # atualiza ângulos com a solução obtida (fsolve devolve ângulos reais)
+    theta1_atual, theta2_atual, theta3_atual, theta4_atual = t1, t2, t3, t4
     atualizar_plot()
     label_coord.config(text=f"Pos atual: X={x_abs:.1f}, Y={y_abs:.1f}, Z={z_abs:.1f}")
 
