@@ -10,10 +10,26 @@ from scipy.optimize import fsolve
 # =========================
 # Configuração Serial Arduino
 # =========================
-PORTA = "COM7"  # altere para sua porta
-BAUDRATE = 9600
-arduino = serial.Serial(PORTA, BAUDRATE, timeout=1)
-time.sleep(2)
+# =========================
+# Configuração Serial Arduino com modo DEBUG
+# =========================
+DEBUG = True  # coloque False quando for usar o Arduino real
+
+if not DEBUG:
+    PORTA = "COM7"  # altere para sua porta
+    BAUDRATE = 9600
+    arduino = serial.Serial(PORTA, BAUDRATE, timeout=1)
+    time.sleep(2)
+else:
+    class FakeArduino:
+        def write(self, data): 
+            print(f"[DEBUG] Enviando comando simulado: {data.decode().strip()}")
+        def readline(self): 
+            return b"[DEBUG] resposta simulada\n"
+        @property
+        def in_waiting(self): 
+            return 0
+    arduino = FakeArduino()
 
 # =========================
 # Braço Robótico
