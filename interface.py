@@ -10,10 +10,14 @@ from scipy.optimize import fsolve
 # =========================
 # Configuração Serial Arduino
 # =========================
-PORTA = "COM7"  # altere para sua porta
+PORTA = "COM7"  # altere para sua porta (ex: "COM3" ou "/dev/ttyUSB0")
 BAUDRATE = 9600
-arduino = serial.Serial(PORTA, BAUDRATE, timeout=1)
-time.sleep(2)
+try:
+    arduino = serial.Serial(PORTA, BAUDRATE, timeout=1)
+    time.sleep(2)
+except Exception as e:
+    print(f"Erro ao abrir porta serial {PORTA}: {e}")
+    arduino = None
 
 # =========================
 # Braço Robótico
@@ -22,10 +26,11 @@ Lbase, L2, L3, L4 = 19.2, 8.0, 12.0, 8.0
 L_final, Lpen = 0.0, 14.0
 reducoes = [24, 24, 24, 8]
 steps_per_rev_motor = 32
+# graus por passo (graus por cada passo físico do sistema de redução)
 graus_por_passo = [360 / (steps_per_rev_motor * 64 * r) for r in reducoes]
 
 # =========================
-# Variáveis de posição atual
+# Variáveis de posição atual (radianos)
 # =========================
 theta1_atual = theta2_atual = theta3_atual = theta4_atual = 0.0
 
@@ -33,9 +38,14 @@ theta1_atual = theta2_atual = theta3_atual = theta4_atual = 0.0
 # Funções Arduino
 # =========================
 def enviar_comando(motor, direcao, passos, delay):
+    """Envia comando serial no formato 'motor,acao,passos,delay' se a serial estiver aberta."""
+    if arduino is None:
+        print("Arduino não conectado — comando não enviado:", motor, direcao, passos, delay)
+        return
     cmd = f"{motor},{direcao},{passos},{delay}\n"
     arduino.write(cmd.encode())
-    time.sleep(0.05)
+    time.sleep(0.02)
+    # lê resposta (se houver) para esvaziar buffer
     while arduino.in_waiting > 0:
         print(arduino.readline().decode().strip())
 
@@ -69,7 +79,10 @@ def direta(t1, t2, t3, t4):
     return xs, ys, zs
 
 def angulo_para_passos(delta_rad, motor_idx):
-    return int(round(np.degrees(delta_rad) / graus_por_passo[motor_idx]))
+    """Converte delta (rad) para número inteiro de passos (assina positiva/negativa)."""
+    deg = np.degrees(delta_rad)
+    passos = int(round(deg / graus_por_passo[motor_idx]))
+    return passos
 
 def delta_theta(theta_dest, theta_atual):
     d = theta_dest - theta_atual
@@ -84,6 +97,7 @@ def erro_angulos(thetas, x_desejado, y_desejado, z_desejado):
     t1, t2, t3, t4 = thetas
     xs, ys, zs = direta(t1, t2, t3, t4)
     x_atual, y_atual, z_atual = xs[-1], ys[-1], zs[-1]
+    # Quarta equação força a orientação (p.ex. pulso plano)
     return [
         x_atual - x_desejado,
         y_atual - y_desejado,
@@ -102,19 +116,29 @@ def inversa_fsolve(x, y, z, chute_inicial=None):
 # Movimento incremental
 # =========================
 def calcular_jacobiano(t1, t2, t3, t4, delta=1e-6):
-    f0 = np.array(direta(t1, t2, t3, t4))
+    f0 = direta(t1, t2, t3, t4)
     pos0 = np.array([f0[0,-1], f0[1,-1], f0[2,-1]])
     J = np.zeros((3,4))
     thetas = [t1, t2, t3, t4]
     for i in range(4):
         dtheta = np.zeros(4)
         dtheta[i] = delta
-        f1 = np.array(direta(*(thetas[j]+dtheta[j] for j in range(4))))
+        # cria lista de thetas com o delta aplicado
+        thetas_pert = [thetas[j] + dtheta[j] for j in range(4)]
+        f1 = direta(*thetas_pert)
         pos1 = np.array([f1[0,-1], f1[1,-1], f1[2,-1]])
         J[:,i] = (pos1 - pos0)/delta
     return J
 
 def mover_para_coordenada_seguro():
+    """
+    Divide o deslocamento em pequenos passos em X,Y,Z e aplica incremental via J^+.
+    Correções aplicadas:
+    - usa angulo_para_passos para obter passos inteiros mantendo sinal;
+    - mapeia corretamente o sinal dos passos para 'H'/'A';
+    - atualiza os thetas usando o número efetivo de passos (conversão p/ radianos)
+    - trata singularidade do jacobiano usando pseudo-inversa com rcond aumentado
+    """
     global theta1_atual, theta2_atual, theta3_atual, theta4_atual
     try:
         x_dest = float(entry_x.get())
@@ -128,24 +152,56 @@ def mover_para_coordenada_seguro():
     pos_atual = np.array([xs[-1], ys[-1], zs[-1]])
     dpos_total = np.array([x_dest, y_dest, z_dest]) - pos_atual
     distancia = np.linalg.norm(dpos_total)
-    passo_max = 1.0
+    passo_max = 1.0  # cm por iteração
     n_passos = int(np.ceil(distancia / passo_max))
-    if n_passos == 0: return
+    if n_passos == 0:
+        label_coord.config(text=f"Pos atual: X={pos_atual[0]:.1f}, Y={pos_atual[1]:.1f}, Z={pos_atual[2]:.1f}")
+        return
     dpos_step = dpos_total / n_passos
 
-    for _ in range(n_passos):
+    for step_idx in range(n_passos):
         J = calcular_jacobiano(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
-        dtheta = np.linalg.pinv(J) @ dpos_step
-        dif_passos = [int(round(np.degrees(dtheta[i]) / graus_por_passo[i])) for i in range(4)]
-        for i, p in enumerate(dif_passos):
-            if p == 0: continue
-            direcao = 'H' if p < 0 else 'A'
-            enviar_comando(i+1, direcao, abs(p), 10)
-        theta1_atual += dtheta[0]
-        theta2_atual += dtheta[1]
-        theta3_atual += dtheta[2]
-        theta4_atual += dtheta[3]
+        # se o jacobiano for mal condicionado, aumenta rcond
+        try:
+            # rcond pequeno -> normal; se rank baixo, usa rcond maior
+            if np.linalg.matrix_rank(J) < 3:
+                dtheta = np.linalg.pinv(J, rcond=1e-2) @ dpos_step
+            else:
+                dtheta = np.linalg.pinv(J) @ dpos_step
+        except Exception as e:
+            print("Erro ao inverter J:", e)
+            return
+
+        # converte incrementos rad -> passos inteiros (preservando sinal)
+        passos_signed = [angulo_para_passos(dtheta[i], i) for i in range(4)]
+
+        # envia comandos aos motores
+        for i, passos in enumerate(passos_signed):
+            if passos == 0: continue
+            direcao = 'H' if passos > 0 else 'A'  # padrão: positivo -> H
+            enviar_comando(i+1, direcao, abs(passos), 10)
+
+        # **Atualiza os ângulos atuais COM base nos passos aplicados**
+        # (em vez de usar dtheta direto, usamos passos efetivos para ficar consistente com o que o motor executou)
+        for i, passos in enumerate(passos_signed):
+            # passos * graus_por_passo[i] -> graus efetivos movidos; converter para rad
+            delta_deg = passos * graus_por_passo[i]
+            delta_rad = np.radians(delta_deg)
+            if i == 0:
+                theta1_atual += delta_rad
+            elif i == 1:
+                theta2_atual += delta_rad
+            elif i == 2:
+                theta3_atual += delta_rad
+            elif i == 3:
+                theta4_atual += delta_rad
+
+        # pequena espera para dar tempo ao Arduino (pode ajustar)
+        # tempo estimado aproximado = passos * delay(ms) / 1000.0
+        # aqui fazemos um sleep curto para não travar muito a GUI
+        time.sleep(0.05)
         atualizar_plot()
+
     label_coord.config(text=f"Pos atual: X={x_dest:.1f}, Y={y_dest:.1f}, Z={z_dest:.1f}")
 
 # =========================
@@ -171,14 +227,27 @@ def mover_para_absoluto_fsolve():
         if p == 0: continue
         direcao = 'H' if p > 0 else 'A'
         enviar_comando(i+1, direcao, abs(p), 10)
-    theta1_atual, theta2_atual, theta3_atual, theta4_atual = t1, t2, t3, t4
+
+    # atualiza os thetas reais usando os passos efetivos enviados
+    for i, p in enumerate(dif_passos):
+        delta_deg = p * graus_por_passo[i]
+        delta_rad = np.radians(delta_deg)
+        if i == 0:
+            theta1_atual += delta_rad
+        elif i == 1:
+            theta2_atual += delta_rad
+        elif i == 2:
+            theta3_atual += delta_rad
+        elif i == 3:
+            theta4_atual += delta_rad
+
     atualizar_plot()
     label_coord.config(text=f"Pos atual: X={x_abs:.1f}, Y={y_abs:.1f}, Z={z_abs:.1f}")
 
 # =========================
 # Movimento juntas de teste
 # =========================
-def mover_junta_temp(junta_idx, delta_graus=5, delay_ms=10, espera_s=10):
+def mover_junta_temp(junta_idx, delta_graus=5, delay_ms=10, espera_s=1):
     passos = int(round(delta_graus / graus_por_passo[junta_idx]))
     enviar_comando(junta_idx+1, 'H', passos, delay_ms)
     time.sleep(espera_s)
