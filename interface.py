@@ -148,7 +148,7 @@ def mover_para_coordenada_seguro():
     distancia = np.linalg.norm(dpos_total)
     passo_max = 1.0  # passo máximo em cm por iteração
     n_passos = int(np.ceil(distancia / passo_max))
-    if n_passos == 0: 
+    if n_passos == 0:
         return
     dpos_step = dpos_total / n_passos
 
@@ -185,6 +185,106 @@ def mover_para_coordenada_seguro():
         atualizar_plot()
 
     label_coord.config(text=f"Pos atual: X={x_dest:.1f}, Y={y_dest:.1f}, Z={z_dest:.1f}")
+
+# =========================
+# Funções de Escrita
+# =========================
+def escrever_texto():
+    texto = entry_texto.get()
+    if not texto:
+        log_mensagem("Nenhum texto para escrever.")
+        return
+
+    # Posição inicial (exemplo: centro da área de escrita)
+    x_start, y_start, z_start = 15.0, 0.0, 10.0
+
+    # Altura de segurança (para movimentos sem contato)
+    z_seguranca = z_start + 5.0
+
+    # Altura de escrita (para contato com a superfície)
+    z_escrita = z_start
+
+    # Mover para a posição inicial de segurança
+    log_mensagem(f"Movendo para posição inicial de segurança: ({x_start:.1f}, {y_start:.1f}, {z_seguranca:.1f})")
+    mover_para_coordenada_seguro_interno(x_start, y_start, z_seguranca)
+
+    # Mover para a posição inicial de escrita
+    log_mensagem(f"Descendo para posição inicial de escrita: ({x_start:.1f}, {y_start:.1f}, {z_escrita:.1f})")
+    mover_para_coordenada_seguro_interno(x_start, y_start, z_escrita)
+
+    # Simulação de escrita (apenas movendo em X para cada caractere)
+    # Em um sistema real, isso envolveria um mapeamento de caracteres para caminhos (strokes)
+    # e movimentos incrementais precisos. Aqui, apenas movemos para a direita.
+    passo_x = 2.0 # cm por caractere
+    x_atual = x_start
+
+    for char in texto:
+        log_mensagem(f"Escrevendo caractere: '{char}'")
+        # Levantar para segurança antes de mover para o próximo ponto
+        mover_para_coordenada_seguro_interno(x_atual, y_start, z_seguranca)
+
+        # Calcular nova posição X
+        x_atual += passo_x
+
+        # Mover para a nova posição X de segurança
+        mover_para_coordenada_seguro_interno(x_atual, y_start, z_seguranca)
+
+        # Descer para a posição de escrita
+        mover_para_coordenada_seguro_interno(x_atual, y_start, z_escrita)
+
+        # Simular o "traço" do caractere (movimento em Z para baixo e para cima)
+        # Para simplificar, vamos apenas simular o tempo de escrita
+        time.sleep(0.1)
+
+    # Levantar para segurança após a escrita
+    log_mensagem("Escrita concluída. Movendo para posição de segurança.")
+    mover_para_coordenada_seguro_interno(x_atual, y_start, z_seguranca)
+    log_mensagem("Pronto.")
+
+def mover_para_coordenada_seguro_interno(x_dest, y_dest, z_dest):
+    # Esta é uma versão interna da função de movimento que não depende das entradas da GUI
+    # e pode ser chamada em sequência sem problemas de threading (embora o time.sleep
+    # ainda bloqueie a GUI, o que é aceitável para este exemplo simples).
+    global theta1_atual, theta2_atual, theta3_atual, theta4_atual
+
+    xs, ys, zs = direta(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
+    pos_atual = np.array([xs[-1], ys[-1], zs[-1]])
+    dpos_total = np.array([x_dest, y_dest, z_dest]) - pos_atual
+    distancia = np.linalg.norm(dpos_total)
+    passo_max = 1.0  # passo máximo em cm por iteração
+    n_passos = int(np.ceil(distancia / passo_max))
+    if n_passos == 0:
+        return
+    dpos_step = dpos_total / n_passos
+
+    for _ in range(n_passos):
+        J = calcular_jacobiano(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
+        dtheta = np.linalg.pinv(J) @ dpos_step
+        passos_por_junta = [int(round(np.degrees(dtheta[i]) / graus_por_passo[i])) for i in range(4)]
+
+        executado_radians = np.zeros(4)
+        for i, p in enumerate(passos_por_junta):
+            if p == 0:
+                continue
+            direcao = 'H' if p > 0 else 'A'
+            passos_envio = abs(p)
+            enviar_comando(i+1, direcao, passos_envio, 10)
+            ang_exec_deg = passos_envio * graus_por_passo[i]
+            ang_exec_rad = np.radians(ang_exec_deg)
+            if p < 0:
+                ang_exec_rad = -ang_exec_rad
+            executado_radians[i] = ang_exec_rad
+
+        theta1_atual += executado_radians[0]
+        theta2_atual += executado_radians[1]
+        theta3_atual += executado_radians[2]
+        theta4_atual += executado_radians[3]
+
+        atualizar_plot()
+        root.update() # Força a atualização da GUI durante o movimento
+
+    label_coord.config(text=f"Pos atual: X={x_dest:.1f}, Y={y_dest:.1f}, Z={z_dest:.1f}")
+    log_mensagem(f"Movido para: X={x_dest:.1f}, Y={y_dest:.1f}, Z={z_dest:.1f}")
 
 # =========================
 # Movimento absoluto com fsolve
@@ -225,7 +325,85 @@ def mover_junta_temp(junta_idx, delta_graus=5, delay_ms=10, espera_s=1):
     time.sleep(espera_s)
 
 # =========================
-# Plot 3D integrado
+# Interface Tkinter (única raiz, com scroll)
+# =========================
+root = tk.Tk()
+root.title("Controle de Motores 28BYJ-48")
+
+# 1. Configurar Canvas e Scrollbar (renomeado para evitar colisão com FigureCanvasTkAgg)
+scroll_canvas = tk.Canvas(root)
+scrollbar = ttk.Scrollbar(root, orient="vertical", command=scroll_canvas.yview)
+scrollable_frame = ttk.Frame(scroll_canvas)
+
+scrollable_frame.bind(
+    "<Configure>",
+    lambda e: scroll_canvas.configure(
+        scrollregion=scroll_canvas.bbox("all")
+    )
+)
+
+scroll_canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+scroll_canvas.configure(yscrollcommand=scrollbar.set)
+
+# 2. Empacotar Canvas e Scrollbar na janela principal
+scroll_canvas.pack(side="left", fill="both", expand=True)
+scrollbar.pack(side="right", fill="y")
+
+# 3. Mudar todos os widgets para usar 'scrollable_frame' como mestre
+sentido_var, passos_entry, delay_entry = [], [], []
+for i in range(4):
+    # Mestre mudado para 'scrollable_frame'
+    frame = ttk.LabelFrame(scrollable_frame, text=f"Motor {i+1}", padding=10)
+    frame.grid(row=0, column=i, padx=5, pady=5)
+    sentido_var.append(tk.StringVar(value='H'))
+    ttk.Radiobutton(frame, text="Horario", variable=sentido_var[i], value='H').pack(anchor='w')
+    ttk.Radiobutton(frame, text="Antihorario", variable=sentido_var[i], value='A').pack(anchor='w')
+    ttk.Label(frame, text="Passos:").pack(anchor='w')
+    e_passos = ttk.Entry(frame, width=10); e_passos.pack(anchor='w'); passos_entry.append(e_passos)
+    ttk.Label(frame, text="Delay (ms):").pack(anchor='w')
+    e_delay = ttk.Entry(frame, width=10); e_delay.insert(0, '10'); e_delay.pack(anchor='w'); delay_entry.append(e_delay)
+    ttk.Button(frame, text="Enviar", command=lambda m=i: comando_motor(m)).pack(pady=2)
+    ttk.Button(frame, text="Parar", command=lambda m=i: parar_motor(m)).pack(pady=2)
+
+# Controle por coordenadas
+frame_coord = ttk.LabelFrame(scrollable_frame, text="Mover por Coordenada (cm)", padding=10)
+frame_coord.grid(row=1, column=0, columnspan=4, padx=5, pady=10, sticky='ew')
+ttk.Label(frame_coord, text="X:").grid(row=0,column=0); entry_x = ttk.Entry(frame_coord, width=10); entry_x.grid(row=0,column=1)
+ttk.Label(frame_coord, text="Y:").grid(row=0,column=2); entry_y = ttk.Entry(frame_coord, width=10); entry_y.grid(row=0,column=3)
+ttk.Label(frame_coord, text="Z:").grid(row=0,column=4); entry_z = ttk.Entry(frame_coord, width=10); entry_z.grid(row=0,column=5)
+ttk.Button(frame_coord, text="Mover Incremental", command=mover_para_coordenada_seguro).grid(row=0,column=6, padx=5)
+ttk.Button(frame_coord, text="Mover Absoluto (fsolve)", command=mover_para_absoluto_fsolve).grid(row=0,column=7, padx=5)
+
+# Controle de Escrita
+frame_escrita = ttk.LabelFrame(scrollable_frame, text="Escrita da Garra", padding=10)
+frame_escrita.grid(row=2, column=0, columnspan=4, padx=5, pady=10, sticky='ew')
+ttk.Label(frame_escrita, text="Texto:").grid(row=0, column=0, padx=5, pady=5)
+entry_texto = ttk.Entry(frame_escrita, width=30)
+entry_texto.grid(row=0, column=1, padx=5, pady=5)
+ttk.Button(frame_escrita, text="Escrever", command=escrever_texto).grid(row=0, column=2, padx=5, pady=5)
+
+# Botões de teste juntas
+frame_testes = ttk.LabelFrame(scrollable_frame, text="Teste 5° por junta", padding=10)
+frame_testes.grid(row=1, column=4, columnspan=2, padx=5, pady=10, sticky='ew')
+for i in range(4):
+    ttk.Button(frame_testes, text=f"Junta {i+1}", command=lambda j=i: mover_junta_temp(j)).grid(row=0, column=i, padx=5)
+
+# Label posição atual (inicial)
+xs_init, ys_init, zs_init = direta(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
+x_init, y_init, z_init = xs_init[-1], ys_init[-1], zs_init[-1]
+label_coord = ttk.Label(scrollable_frame, text=f"Pos atual: X={x_init:.1f}, Y={y_init:.1f}, Z={z_init:.1f}")
+label_coord.grid(row=3, column=0, columnspan=4, pady=5)
+
+# =========================
+# Plot 3D integrado (FigureCanvasTkAgg)
+# =========================
+fig = plt.figure(figsize=(8,6))
+ax = fig.add_subplot(111, projection='3d')
+canvas_plot = FigureCanvasTkAgg(fig, master=scrollable_frame)
+canvas_plot.get_tk_widget().grid(row=4, column=0, columnspan=4)
+
+# =========================
+# Plot update function (use canvas_plot)
 # =========================
 def atualizar_plot():
     xs, ys, zs = direta(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
@@ -246,54 +424,27 @@ def atualizar_plot():
     ax.set_title('Braço Robótico 4R')
     ax.view_init(elev=30, azim=60)
     ax.set_box_aspect([1,1,0.5])
-    canvas.draw()
+    # Use the correct canvas variable for Matplotlib
+    canvas_plot.draw()
 
-# =========================
-# Interface Tkinter
-# =========================
-root = tk.Tk()
-root.title("Controle de Motores 28BYJ-48")
-
-sentido_var, passos_entry, delay_entry = [], [], []
-for i in range(4):
-    frame = ttk.LabelFrame(root, text=f"Motor {i+1}", padding=10)
-    frame.grid(row=0, column=i, padx=5, pady=5)
-    sentido_var.append(tk.StringVar(value='H'))
-    ttk.Radiobutton(frame, text="Horario", variable=sentido_var[i], value='H').pack(anchor='w')
-    ttk.Radiobutton(frame, text="Antihorario", variable=sentido_var[i], value='A').pack(anchor='w')
-    ttk.Label(frame, text="Passos:").pack(anchor='w')
-    e_passos = ttk.Entry(frame, width=10); e_passos.pack(anchor='w'); passos_entry.append(e_passos)
-    ttk.Label(frame, text="Delay (ms):").pack(anchor='w')
-    e_delay = ttk.Entry(frame, width=10); e_delay.insert(0, '10'); e_delay.pack(anchor='w'); delay_entry.append(e_delay)
-    ttk.Button(frame, text="Enviar", command=lambda m=i: comando_motor(m)).pack(pady=2)
-    ttk.Button(frame, text="Parar", command=lambda m=i: parar_motor(m)).pack(pady=2)
-
-# Controle por coordenadas
-frame_coord = ttk.LabelFrame(root, text="Mover por Coordenada (cm)", padding=10)
-frame_coord.grid(row=1, column=0, columnspan=4, padx=5, pady=10, sticky='ew')
-ttk.Label(frame_coord, text="X:").grid(row=0,column=0); entry_x = ttk.Entry(frame_coord, width=10); entry_x.grid(row=0,column=1)
-ttk.Label(frame_coord, text="Y:").grid(row=0,column=2); entry_y = ttk.Entry(frame_coord, width=10); entry_y.grid(row=0,column=3)
-ttk.Label(frame_coord, text="Z:").grid(row=0,column=4); entry_z = ttk.Entry(frame_coord, width=10); entry_z.grid(row=0,column=5)
-ttk.Button(frame_coord, text="Mover Incremental", command=mover_para_coordenada_seguro).grid(row=0,column=6, padx=5)
-ttk.Button(frame_coord, text="Mover Absoluto (fsolve)", command=mover_para_absoluto_fsolve).grid(row=0,column=7, padx=5)
-
-# Botões de teste juntas
-frame_testes = ttk.LabelFrame(root, text="Teste 5° por junta", padding=10)
-frame_testes.grid(row=1, column=4, columnspan=2, padx=5, pady=10, sticky='ew')
-for i in range(4):
-    ttk.Button(frame_testes, text=f"Junta {i+1}", command=lambda j=i: mover_junta_temp(j)).grid(row=0, column=i, padx=5)
-
-# Label posição atual
-xs_init, ys_init, zs_init = direta(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
-x_init, y_init, z_init = xs_init[-1], ys_init[-1], zs_init[-1]
-label_coord = ttk.Label(root, text=f"Pos atual: X={x_init:.1f}, Y={y_init:.1f}, Z={z_init:.1f}")
-label_coord.grid(row=2, column=0, columnspan=4, pady=5)
-
-# Plot 3D
-fig = plt.figure(figsize=(8,6))
-ax = fig.add_subplot(111, projection='3d')
-canvas = FigureCanvasTkAgg(fig, master=root)
-canvas.get_tk_widget().grid(row=3, column=0, columnspan=4)
+# chama o plot inicial
 atualizar_plot()
+
+# =========================
+# Log de Interface (agora que scrollable_frame existe)
+# =========================
+frame_log = ttk.LabelFrame(scrollable_frame, text="Log de Interface", padding=5)
+frame_log.grid(row=0, column=4, rowspan=5, padx=5, pady=5, sticky='nsew')
+log_text = tk.Text(frame_log, height=30, width=50, state='normal')
+log_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+log_scroll = ttk.Scrollbar(frame_log, command=log_text.yview)
+log_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+log_text.config(yscrollcommand=log_scroll.set)
+
+def log_mensagem(mensagem):
+    log_text.insert(tk.END, f"{time.strftime('%H:%M:%S')} - {mensagem}\n")
+    log_text.see(tk.END) # Rola para o final
+
+log_mensagem("Sistema inicializado. Modo DEBUG ativo.")
 
 root.mainloop()
