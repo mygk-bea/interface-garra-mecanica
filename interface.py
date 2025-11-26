@@ -492,7 +492,7 @@ frame_plot.grid_columnconfigure(0, weight=1)
 plot_decor = decorative_label(frame_plot, "Modelo Tridimensional")
 plot_decor.pack(fill='x', pady=(0,10))
 
-fig = plt.figure(figsize=(12,8)) 
+fig = plt.figure(figsize=(10,5)) 
 fig.patch.set_facecolor(COR_FUNDO_WIDGET)
 ax = fig.add_subplot(111, projection='3d')
 canvas = FigureCanvasTkAgg(fig, master=frame_plot)
@@ -501,7 +501,7 @@ canvas.get_tk_widget().pack(fill='both', expand=True, padx=12, pady=(0,8))
 xs_init, ys_init, zs_init = direta(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
 label_coord = tk.Label(frame_plot, text=f"Posição Atual: X = {xs_init[-1]:.1f} Y = {ys_init[-1]:.1f} Z = {zs_init[-1]:.1f}",
 bg=COR_FUNDO_WIDGET, fg=COR_TEXTO)
-label_coord.pack(pady=(0,8))
+label_coord.pack(pady=(0,20))
 
 # ---------- 6. Coordenadas e botões de movimento (rodapé) ----------
 frame_coord = tk.Frame(root, bg=COR_FUNDO)
@@ -518,6 +518,7 @@ coord_inner.columnconfigure(1, weight=1)
 coord_inner.columnconfigure(3, weight=1)
 coord_inner.columnconfigure(5, weight=1)
 
+# entries e botões de coordenadas
 tk.Label(coord_inner, text="X:", bg=COR_FUNDO, fg=COR_TEXTO).grid(row=0, column=0, padx=(0,6), sticky='e')
 entry_x = tk.Entry(coord_inner, width=20,
     bg=INPUT_BG,         
