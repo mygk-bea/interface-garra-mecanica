@@ -462,7 +462,7 @@ entry_texto = tk.Entry(txt_inner,
     font=("Segoe UI", 10),)
 entry_texto.pack(side='left', fill='x', expand=True, padx=(0,10), ipady=5, pady=(4, 0))
 tk.Button(txt_inner, text="Enviar", 
-        command=enviar_texto,   
+        command=escrever_texto,   
         font=("Segoe UI", 10, "bold"),
         bg=COR_PRIMARIA,     
         fg=COR_TEXTO,  
@@ -473,6 +473,106 @@ tk.Button(txt_inner, text="Enviar",
         padx=8,              
         pady=4               
         ).pack(side='right')
+
+# =========================
+# Funções de Escrita
+# =========================
+def escrever_texto():
+    texto = entry_texto.get()
+    if not texto:
+        log_mensagem("Nenhum texto para escrever.")
+        return
+
+    # Posição inicial (exemplo: centro da área de escrita)
+    x_start, y_start, z_start = 15.0, 0.0, 10.0
+
+    # Altura de segurança (para movimentos sem contato)
+    z_seguranca = z_start + 5.0
+
+    # Altura de escrita (para contato com a superfície)
+    z_escrita = z_start
+
+    # Mover para a posição inicial de segurança
+    log_mensagem(f"Movendo para posição inicial de segurança: ({x_start:.1f}, {y_start:.1f}, {z_seguranca:.1f})")
+    mover_para_coordenada_seguro_interno(x_start, y_start, z_seguranca)
+
+    # Mover para a posição inicial de escrita
+    log_mensagem(f"Descendo para posição inicial de escrita: ({x_start:.1f}, {y_start:.1f}, {z_escrita:.1f})")
+    mover_para_coordenada_seguro_interno(x_start, y_start, z_escrita)
+
+    # Simulação de escrita (apenas movendo em X para cada caractere)
+    # Em um sistema real, isso envolveria um mapeamento de caracteres para caminhos (strokes)
+    # e movimentos incrementais precisos. Aqui, apenas movemos para a direita.
+    passo_x = 2.0 # cm por caractere
+    x_atual = x_start
+
+    for char in texto:
+        log_mensagem(f"Escrevendo caractere: '{char}'")
+        # Levantar para segurança antes de mover para o próximo ponto
+        mover_para_coordenada_seguro_interno(x_atual, y_start, z_seguranca)
+
+        # Calcular nova posição X
+        x_atual += passo_x
+
+        # Mover para a nova posição X de segurança
+        mover_para_coordenada_seguro_interno(x_atual, y_start, z_seguranca)
+
+        # Descer para a posição de escrita
+        mover_para_coordenada_seguro_interno(x_atual, y_start, z_escrita)
+
+        # Simular o "traço" do caractere (movimento em Z para baixo e para cima)
+        # Para simplificar, vamos apenas simular o tempo de escrita
+        time.sleep(0.1)
+
+    # Levantar para segurança após a escrita
+    log_mensagem("Escrita concluída. Movendo para posição de segurança.")
+    mover_para_coordenada_seguro_interno(x_atual, y_start, z_seguranca)
+    log_mensagem("Pronto.")
+
+def mover_para_coordenada_seguro_interno(x_dest, y_dest, z_dest):
+    # Esta é uma versão interna da função de movimento que não depende das entradas da GUI
+    # e pode ser chamada em sequência sem problemas de threading (embora o time.sleep
+    # ainda bloqueie a GUI, o que é aceitável para este exemplo simples).
+    global theta1_atual, theta2_atual, theta3_atual, theta4_atual
+
+    xs, ys, zs = direta(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
+    pos_atual = np.array([xs[-1], ys[-1], zs[-1]])
+    dpos_total = np.array([x_dest, y_dest, z_dest]) - pos_atual
+    distancia = np.linalg.norm(dpos_total)
+    passo_max = 1.0  # passo máximo em cm por iteração
+    n_passos = int(np.ceil(distancia / passo_max))
+    if n_passos == 0:
+        return
+    dpos_step = dpos_total / n_passos
+
+    for _ in range(n_passos):
+        J = calcular_jacobiano(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
+        dtheta = np.linalg.pinv(J) @ dpos_step
+        passos_por_junta = [int(round(np.degrees(dtheta[i]) / graus_por_passo[i])) for i in range(4)]
+
+        executado_radians = np.zeros(4)
+        for i, p in enumerate(passos_por_junta):
+            if p == 0:
+                continue
+            direcao = 'H' if p > 0 else 'A'
+            passos_envio = abs(p)
+            enviar_comando(i+1, direcao, passos_envio, 10)
+            ang_exec_deg = passos_envio * graus_por_passo[i]
+            ang_exec_rad = np.radians(ang_exec_deg)
+            if p < 0:
+                ang_exec_rad = -ang_exec_rad
+            executado_radians[i] = ang_exec_rad
+
+        theta1_atual += executado_radians[0]
+        theta2_atual += executado_radians[1]
+        theta3_atual += executado_radians[2]
+        theta4_atual += executado_radians[3]
+
+        atualizar_plot()
+        root.update() # Força a atualização da GUI durante o movimento
+
+    label_coord.config(text=f"Pos atual: X={x_dest:.1f}, Y={y_dest:.1f}, Z={z_dest:.1f}")
+    log_mensagem(f"Movido para: X={x_dest:.1f}, Y={y_dest:.1f}, Z={z_dest:.1f}")
 
 # ---------- 4. Log ----------
 frame_log = tk.Frame(root, bg=COR_FUNDO)
