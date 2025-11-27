@@ -264,7 +264,6 @@ root = tk.Tk()
 root.title("CONTROLADORA DO BRAÇO MECÂNICO")
 
 root.state("zoomed") 
-root.minsize(1920, 1080)
 
 base_path = os.path.dirname(os.path.abspath(__file__))
 theme_path = os.path.join(base_path, "theme", "custom_dark.tcl")
@@ -287,7 +286,49 @@ INPUT_BG = '#151515'
 COR_BORDA = '#2F2F2F'
 DISABLED_BG = '#555555'
 
-root.configure(bg=COR_FUNDO)
+container = tk.Frame(root, bg=COR_FUNDO)
+container.pack(fill="both", expand=True)
+
+canvas = tk.Canvas(
+    container,
+    bg=COR_FUNDO,
+    highlightthickness=0
+)
+canvas.pack(side="left", fill="both", expand=True)
+
+scrollbar = tk.Scrollbar(
+    container,
+    orient="vertical",
+    command=canvas.yview
+)
+scrollbar.pack(side="right", fill="y")
+
+canvas.configure(yscrollcommand=scrollbar.set)
+
+# Frame que segura TODO o conteúdo
+content_frame = tk.Frame(canvas, bg=COR_FUNDO)
+
+# cria uma window dentro do canvas
+canvas_window = canvas.create_window((0, 0), window=content_frame, anchor="nw")
+
+
+def resize_content(event):
+    # Faz o content_frame ter exatamente a largura do canvas
+    canvas.itemconfig(canvas_window, width=event.width)
+
+# Atualiza scrollregion quando os widgets mudarem de tamanho
+def update_scroll(event):
+    canvas.configure(scrollregion=canvas.bbox("all"))
+
+content_frame.bind("<Configure>", update_scroll)
+canvas.bind("<Configure>", resize_content)
+
+
+# Suporte a rolagem pelo mouse
+def _on_mousewheel(event):
+    canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
 default_font = ("Segoe UI", 10)
 style.configure(".", background=COR_FUNDO, foreground=COR_TEXTO, font=default_font)
@@ -296,13 +337,13 @@ style.configure("Card.TLabelframe.Label", background=COR_FUNDO_WIDGET, foregroun
 
 
 for i in range(5):
-    root.grid_columnconfigure(i, weight=1)
-root.grid_columnconfigure(4, weight=2)
+    content_frame.grid_columnconfigure(i, weight=1)
+content_frame.grid_columnconfigure(4, weight=2)
 for r in range(7):
-    root.grid_rowconfigure(r, weight=0)
-root.grid_rowconfigure(4, weight=1)
-root.grid_rowconfigure(5, weight=0)
-root.grid_rowconfigure(6, weight=0)
+    content_frame.grid_rowconfigure(r, weight=0)
+content_frame.grid_rowconfigure(4, weight=1)
+content_frame.grid_rowconfigure(5, weight=0)
+content_frame.grid_rowconfigure(6, weight=0)
 
 def decorative_label(master, text, fg=COR_PRIMARIA, bg=COR_FUNDO, height=3, pad_top=6, pad_bottom=6):
     wrap = tk.Frame(master, bg=bg)
@@ -328,12 +369,12 @@ def decorative_label(master, text, fg=COR_PRIMARIA, bg=COR_FUNDO, height=3, pad_
     return wrap
 
 # ---------- Título principal ----------
-title_lbl = tk.Label(root, text="CONTROLADORA DO BRAÇO MECÂNICO",
+title_lbl = tk.Label(content_frame, text="CONTROLADORA DO BRAÇO MECÂNICO",
 font=("Segoe UI", 26, "bold"), fg=COR_PRIMARIA, bg=COR_FUNDO)
 title_lbl.grid(row=0, column=0, columnspan=5, pady=(22, 12), padx=(20), sticky='w')
 
 # ---------- 1. Motores Individuais (2x2 cards) ----------
-frame_motores = tk.Frame(root, bg=COR_FUNDO)
+frame_motores = tk.Frame(content_frame, bg=COR_FUNDO)
 frame_motores.grid(row=1, column=0, columnspan=4, sticky='nsew', padx=18, pady=(8,10))
 decor = decorative_label(frame_motores, "Motores Individuais")
 decor.pack(fill='x', pady=(0,10))
@@ -423,7 +464,7 @@ for i in range(4):
     b_stop.pack(side='left', expand=True, fill='x')
 
 # ---------- 2. Executar Testes (linha de botões) ----------
-frame_testes = tk.Frame(root, bg=COR_FUNDO)
+frame_testes = tk.Frame(content_frame, bg=COR_FUNDO)
 frame_testes.grid(row=2, column=0, columnspan=4, sticky='ew', padx=18, pady=(4,8))
 decor_testes = decorative_label(frame_testes, "Executar Testes (5° por junta)")
 decor_testes.pack(fill='x', pady=(0,15))
@@ -444,7 +485,7 @@ for i in range(4):
     b.pack(side='left', expand=True, fill='x', padx=8)
 
 # ---------- 3. Digite um texto ----------
-frame_texto = tk.Frame(root, bg=COR_FUNDO)
+frame_texto = tk.Frame(content_frame, bg=COR_FUNDO)
 frame_texto.grid(row=3, column=0, columnspan=4, sticky='ew', padx=18, pady=(4,8))
 decor_texto = decorative_label(frame_texto, "Envio de Texto")
 decor_texto.pack(fill='x',  pady=(10, 10))
@@ -475,17 +516,18 @@ tk.Button(txt_inner, text="Enviar",
         ).pack(side='right')
 
 # ---------- 4. Log ----------
-frame_log = tk.Frame(root, bg=COR_FUNDO)
+frame_log = tk.Frame(content_frame, bg=COR_FUNDO)
+
 frame_log.grid(row=4, column=0, columnspan=4, sticky='nsew', padx=18, pady=(5,10))
 decor_log = decorative_label(frame_log, "Log")
 decor_log.pack(fill='x', pady=(0,8))
 log_box = tk.Frame(frame_log, bg=COR_FUNDO)
 log_box.pack(fill='both', expand=True, padx=10)
-log_text = tk.Text(log_box, height=20, bg=COR_FUNDO_WIDGET, fg=COR_TEXTO, insertbackground=COR_TEXTO, relief=tk.FLAT)
+log_text = tk.Text(log_box, height=5, bg=COR_FUNDO_WIDGET, fg=COR_TEXTO, insertbackground=COR_TEXTO, relief=tk.FLAT)
 log_text.pack(fill='both', expand=True)
 
 # ---------- 5. Painel 3D (direita) ----------
-frame_plot = tk.Frame(root, bg=COR_FUNDO_WIDGET)
+frame_plot = tk.Frame(content_frame, bg=COR_FUNDO_WIDGET)
 frame_plot.grid(row=1, column=4, rowspan=4, sticky='nsew', padx=18, pady=12)
 frame_plot.grid_rowconfigure(0, weight=1)
 frame_plot.grid_columnconfigure(0, weight=1)
@@ -495,8 +537,8 @@ plot_decor.pack(fill='x', pady=(0,10))
 fig = plt.figure(figsize=(10,5)) 
 fig.patch.set_facecolor(COR_FUNDO_WIDGET)
 ax = fig.add_subplot(111, projection='3d')
-canvas = FigureCanvasTkAgg(fig, master=frame_plot)
-canvas.get_tk_widget().pack(fill='both', expand=True, padx=12, pady=(0,8))
+plot_canvas  = FigureCanvasTkAgg(fig, master=frame_plot)
+plot_canvas.get_tk_widget().pack(fill='both', expand=True, padx=12, pady=(0,8))
 
 xs_init, ys_init, zs_init = direta(theta1_atual, theta2_atual, theta3_atual, theta4_atual)
 label_coord = tk.Label(frame_plot, text=f"Posição Atual: X = {xs_init[-1]:.1f} Y = {ys_init[-1]:.1f} Z = {zs_init[-1]:.1f}",
@@ -504,7 +546,7 @@ bg=COR_FUNDO_WIDGET, fg=COR_TEXTO)
 label_coord.pack(pady=(0,20))
 
 # ---------- 6. Coordenadas e botões de movimento (rodapé) ----------
-frame_coord = tk.Frame(root, bg=COR_FUNDO)
+frame_coord = tk.Frame(content_frame, bg=COR_FUNDO)
 frame_coord.grid(row=5, column=0, columnspan=5, sticky='ew', padx=18, pady=(0,18))
 decor_coord = decorative_label(frame_coord, "Definir Coordenadas")
 decor_coord.pack(fill='x', pady=(0,10))
@@ -564,7 +606,8 @@ tk.Button(coord_inner, text="Movimento Incremental",
         relief="flat",        
         padx=8,               
         pady=4                
-        ).grid(row=0, column=6, padx=(50))
+).grid(row=0, column=8, padx=8)
+
 tk.Button(coord_inner, text="Movimento Absoluto (fsolve)", 
         command=mover_para_absoluto_fsolve,   
         font=("Segoe UI", 10, "bold"),
@@ -576,7 +619,20 @@ tk.Button(coord_inner, text="Movimento Absoluto (fsolve)",
         relief="flat",        
         padx=8,               
         pady=4                
-        ).grid(row=0, column=7)
+).grid(row=0, column=9, padx=(20,60))
+
+tk.Button(coord_inner, text="Home", 
+        command=mover_para_absoluto_fsolve,   
+        font=("Segoe UI", 10, "bold"),
+        bg=COR_ERRO,      
+        fg=COR_TEXTO,         
+        activebackground="#444444",  
+        activeforeground=COR_FUNDO, 
+        borderwidth=0,        
+        relief="flat",        
+        padx=8,               
+        pady=4                
+).grid(row=0, column=10)
 
 # ---------- Função de desenho do plot ----------
 def atualizar_plot():
@@ -621,8 +677,8 @@ def atualizar_plot():
         ax.set_box_aspect([1,1,0.6])
     except Exception:
         pass
-    canvas.draw()
+    plot_canvas.draw()
 
 atualizar_plot()
 
-root.mainloop() 
+content_frame.mainloop() 
