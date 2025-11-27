@@ -1,8 +1,8 @@
 import numpy as np
 from scipy.optimize import fsolve
 
-Lbase, L2, L3, L4 = 19.2, 8.0, 12.0, 8.0
-L_final, Lpen = 0.0, 14.0
+Lbase, L2, L3, L4 = 18.0, 10.0, 11.0, 13.5
+L_final, Lpen = 0.0, 11.0
 
 reducoes = [24, 24, 24, 8]
 steps_per_rev_motor = 32

@@ -4,9 +4,6 @@ import tkinter.font as tkfont
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.pyplot as plt
 
-# =========================
-# Paleta e Estilos
-# =========================
 COR_PRIMARIA = '#188181'
 COR_SECUNDARIA = '#FFD166'
 COR_ERRO = '#b94444'
@@ -55,7 +52,7 @@ def criar_interface(root, callbacks, initial_coord):
     style.configure(".", background=COR_FUNDO, foreground=COR_TEXTO, font=default_font)
     style.configure("Card.TLabelframe", background=COR_FUNDO_WIDGET, foreground=COR_PRIMARIA, borderwidth=0)
     style.configure("Card.TLabelframe.Label", background=COR_FUNDO_WIDGET, foreground=COR_PRIMARIA, font=("Segoe UI", 11, "bold"))
-    
+
     # --- Estrutura de Scroll ---
     container = tk.Frame(root, bg=COR_FUNDO)
     container.pack(fill="both", expand=True)
@@ -72,7 +69,7 @@ def criar_interface(root, callbacks, initial_coord):
     canvas_window = canvas_scroll.create_window((0, 0), window=content_frame, anchor="nw")
     widgets["content_frame"] = content_frame # Armazena para grid
 
-    # Handlers de scroll (adaptados do código original)
+    # Handlers de scroll
     def resize_content(event):
         canvas_scroll.itemconfig(canvas_window, width=event.width)
     def update_scroll(event):
@@ -86,7 +83,7 @@ def criar_interface(root, callbacks, initial_coord):
 
     # Configuração de Grid principal
     for i in range(5): content_frame.grid_columnconfigure(i, weight=1)
-    content_frame.grid_columnconfigure(4, weight=2)
+    content_frame.grid_columnconfigure(4, weight=6)
     for r in range(7): content_frame.grid_rowconfigure(r, weight=0)
     content_frame.grid_rowconfigure(4, weight=1) 
 
@@ -103,8 +100,6 @@ def criar_interface(root, callbacks, initial_coord):
 
     inner_motors = tk.Frame(frame_motores, bg=COR_FUNDO)
     inner_motors.pack(fill='both', expand=True)
-    
-    # Configura o inner_motors para 4 colunas com peso igual
     for c in range(4): inner_motors.columnconfigure(c, weight=1) 
 
     sentido_var_list, passos_entry_list, delay_entry_list = [], [], []
@@ -112,17 +107,19 @@ def criar_interface(root, callbacks, initial_coord):
         card = tk.Frame(inner_motors, bg=COR_FUNDO_WIDGET, bd=0)
         card.grid(row=0, column=i, padx=10, pady=5, sticky='nsew') 
 
-        # O resto da lógica interna do card permanece a mesma
+        # Título do Motor
         lbl = tk.Label(card, text=f"Motor {i+1}", bg=COR_FUNDO_WIDGET, fg=COR_TEXTO, font=("Segoe UI", 10, "bold"))
         lbl.pack(anchor='w', padx=12, pady=(10,4))
 
+        # Radio Buttons Verticalizados
         sentido_var = tk.StringVar(value='H')
         sentido_var_list.append(sentido_var)
         rbf = tk.Frame(card, bg=COR_FUNDO_WIDGET)
         rbf.pack(anchor='w', padx=12)
-        ttk.Radiobutton(rbf, text="Horário", variable=sentido_var, value='H').pack(side='left', padx=(0,10))
-        ttk.Radiobutton(rbf, text="Anti-horário", variable=sentido_var, value='A').pack(side='left')
+        ttk.Radiobutton(rbf, text="Horário", variable=sentido_var, value='H').pack(anchor='w', pady=1) 
+        ttk.Radiobutton(rbf, text="Anti-horário", variable=sentido_var, value='A').pack(anchor='w', pady=1)
 
+        # Entradas de Passos e Delay
         tk.Label(card, text="Passos:", bg=COR_FUNDO_WIDGET, fg=COR_TEXTO).pack(anchor='w', padx=12, pady=(10,2))
         e_pass = tk.Entry(card, bg=INPUT_BG, fg="white", insertbackground="white", relief="flat", highlightthickness=2, highlightbackground="#333333", highlightcolor="#333333", bd=0, font=("Segoe UI", 10),)
         e_pass.pack(anchor='w', padx=12, ipady=5, fill='x', expand=True)
@@ -134,10 +131,11 @@ def criar_interface(root, callbacks, initial_coord):
         e_delay.insert(0, "10") 
         delay_entry_list.append(e_delay)
 
+        # Botões Verticalizados
         btn_f = tk.Frame(card, bg=COR_FUNDO_WIDGET)
         btn_f.pack(fill='x', padx=12, pady=(6,12))
-        tk.Button(btn_f, text="Enviar", command=lambda m=i: callbacks["comando_motor"](m), font=("Segoe UI", 10, "bold"), bg=COR_PRIMARIA, fg=COR_TEXTO, activebackground="#444444", activeforeground=COR_FUNDO, borderwidth=0, relief="flat", padx=8, pady=4).pack(side='left', expand=True, fill='x', padx=(0,8))
-        tk.Button(btn_f, text="Parar", command=lambda m=i: callbacks["parar_motor"](m), font=("Segoe UI", 10, "bold"), bg=COR_ERRO, fg=COR_TEXTO, activebackground="#C9302C", activeforeground=COR_FUNDO, borderwidth=0, relief="flat", padx=8, pady=4).pack(side='left', expand=True, fill='x')
+        tk.Button(btn_f, text="Enviar", command=lambda m=i: callbacks["comando_motor"](m), font=("Segoe UI", 10, "bold"), bg=COR_PRIMARIA, fg=COR_TEXTO, activebackground="#444444", activeforeground=COR_FUNDO, borderwidth=0, relief="flat", padx=8, pady=4).pack(fill='x', pady=(0, 4))
+        tk.Button(btn_f, text="Parar", command=lambda m=i: callbacks["parar_motor"](m), font=("Segoe UI", 10, "bold"), bg=COR_ERRO, fg=COR_TEXTO, activebackground="#C9302C", activeforeground=COR_FUNDO, borderwidth=0, relief="flat", padx=8, pady=4).pack(fill='x')
 
     # Armazena as listas de variáveis e entradas
     widgets["sentido_var_list"] = sentido_var_list
@@ -155,6 +153,10 @@ def criar_interface(root, callbacks, initial_coord):
         tk.Button(btns_testes_frame, text=f"Junta {i+1}", command=lambda j=i: callbacks["mover_junta_temp"](j), 
             font=("Segoe UI", 10, "bold"), bg=COR_PRIMARIA, fg=COR_TEXTO, activebackground="#444444",
             activeforeground=COR_FUNDO, borderwidth=0, relief="flat", padx=8, pady=4).pack(side='left', expand=True, fill='x', padx=8)
+
+    tk.Button(btns_testes_frame, text="CALIBRAR Z (Papel)", command=callbacks["calibrar_z_callback"],
+        font=("Segoe UI", 10, "bold"), bg=COR_SECUNDARIA, fg=COR_FUNDO, activebackground=COR_FUNDO_WIDGET, 
+        activeforeground=COR_TEXTO, borderwidth=0, relief="flat", padx=8, pady=4).pack(side='right', padx=8)
 
     # ---------- 3. Digite um texto (Comando atualizado) ----------
     frame_texto = tk.Frame(content_frame, bg=COR_FUNDO)
@@ -249,5 +251,4 @@ def criar_interface(root, callbacks, initial_coord):
     tk.Button(coord_inner, text="Movimento Incremental", command=callbacks["mover_para_coordenada_seguro"], font=("Segoe UI", 10, "bold"), bg=COR_PRIMARIA, fg=COR_TEXTO, activebackground="#444444", activeforeground=COR_FUNDO, borderwidth=0, relief="flat", padx=8, pady=4).grid(row=0, column=6, padx=(20, 8)) 
     tk.Button(coord_inner, text="Movimento Absoluto (fsolve)", command=callbacks["mover_para_absoluto_fsolve"], font=("Segoe UI", 10, "bold"), bg=COR_PRIMARIA, fg=COR_TEXTO, activebackground="#444444", activeforeground=COR_FUNDO, borderwidth=0, relief="flat", padx=8, pady=4).grid(row=0, column=7, padx=(8, 8)) 
     tk.Button(coord_inner, text="Home", command=callbacks["mover_para_home"], font=("Segoe UI", 10, "bold"), bg=COR_ERRO, fg=COR_TEXTO, activebackground="#C9302C", activeforeground=COR_FUNDO, borderwidth=0, relief="flat", padx=8, pady=4).grid(row=0, column=8, padx=(50, 0)) 
-    
     return widgets

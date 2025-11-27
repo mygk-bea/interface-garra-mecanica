@@ -1,13 +1,10 @@
 import serial
 import time
 
-# Constante de depuração
-DEBUG = True
-
-# Variável global para a conexão serial
+DEBUG = False 
 arduino = None
 
-def configurar_conexao(log_func, porta="COM7", baudrate=9600):
+def configurar_conexao(log_func, porta="COM8", baudrate=9600):
     """
     Tenta estabelecer a conexão serial ou inicializa o FakeArduino.
     Retorna o objeto Arduino (real ou fake).
@@ -21,7 +18,7 @@ def configurar_conexao(log_func, porta="COM7", baudrate=9600):
             except Exception:
                 pass
         def readline(self):
-            return b"[DEBUG] resposta simulada\n"
+            return b"[DEBUG] Resposta simulada recebida\n"
         @property
         def in_waiting(self):
             return 0
@@ -43,7 +40,9 @@ def configurar_conexao(log_func, porta="COM7", baudrate=9600):
     return arduino
 
 def enviar_comando(motor, direcao, passos, delay, log_func):
-    """Envia um comando para o Arduino (ou FakeArduino) e lida com a resposta."""
+    """
+    Envia um comando para o Arduino (ou FakeArduino) no formato: motor,acao,passos,delay\n
+    """
     global arduino, DEBUG
     
     if arduino is None:
